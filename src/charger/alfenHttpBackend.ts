@@ -171,6 +171,7 @@ export class AlfenHttpBackend implements ChargerBackend {
         mode3State: toNumber(properties.get(PARAM.MODE3_STATE)),
         socketState: toNumber(properties.get(PARAM.SOCKET_STATE)),
         mainState: toNumber(properties.get(PARAM.MAIN_STATE)),
+        maxPhases: toNumber(properties.get(PARAM.MAX_PHASES)),
         readAt: Date.now(),
       };
     });

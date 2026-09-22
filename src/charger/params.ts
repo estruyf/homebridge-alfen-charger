@@ -31,11 +31,101 @@ export const PARAM = {
   VOLTAGE_L1: '2221_3',
   /** OD_sysNumSockets */
   NUM_SOCKETS: '205E_0',
+  /** OD_mainMaxNrPhases1 - phases wired to socket 1, 1 or 3. Drives kW <-> A. */
+  MAX_PHASES: '312E_0',
   /** OD_sysFeatureEnabled - licence bitmask, see LICENSE. */
   LICENSES: '21A2_0',
   /** OD_sysUpTime */
   UPTIME: '2060_0',
+
+  // --- Solar charging. These are the "Power Settings" screen in Eve Connect.
+  //     The plugin reads them for diagnostics but never writes them.
+  /** OD_sysSolarCharging.operationMode - see SOLAR_MODE. */
+  SOLAR_MODE: '3280_1',
+  /** OD_sysSolarCharging.greenShare - percentage, 0-100. */
+  SOLAR_GREEN_SHARE: '3280_2',
+  /** OD_sysSolarCharging.comfortLevel - W. Capped at 3300 on a 1-phase socket. */
+  SOLAR_COMFORT_LEVEL: '3280_3',
+  /** OD_sysSolarCharging.overrideSocket1 - the app's solar "boost". */
+  SOLAR_OVERRIDE: '3280_4',
 } as const;
+
+/**
+ * 3280_1 operation mode. In the Eve Connect app this single parameter drives
+ * both the "Solar Charging" toggle and the Comfort/Green choice under it.
+ */
+export const SOLAR_MODE: Record<number, string> = {
+  0: 'Disabled',
+  1: 'Comfort',
+  2: 'Green',
+};
+
+export function describeSolarMode(value: number | null): string {
+  if (value === null) {
+    return 'unknown';
+  }
+  return SOLAR_MODE[value] ?? `unknown (${value})`;
+}
+
+/**
+ * Nominal mains voltage used to convert between amps and kW, matching what the
+ * Eve Connect app appears to assume.
+ *
+ * The charger stores amps; kW is always a derived figure. We deliberately use a
+ * fixed nominal voltage rather than the measured one (2221_3): mains voltage
+ * sags under load, so converting against it would make the same kW setting
+ * resolve to a different current each time it was applied.
+ */
+export const NOMINAL_VOLTAGE = 230;
+
+/** Phases wired to the socket, when the charger has not told us yet. */
+export const DEFAULT_PHASES = 1;
+
+/** kW -> whole amps, as the charger stores them. Not clamped. */
+export function powerToAmps(
+  kilowatts: number,
+  phases: number = DEFAULT_PHASES,
+  voltage: number = NOMINAL_VOLTAGE,
+): number {
+  return Math.round((kilowatts * 1000) / (voltage * phases));
+}
+
+/** Amps -> kW, rounded to one decimal the way the app displays it. */
+export function ampsToPower(
+  amps: number,
+  phases: number = DEFAULT_PHASES,
+  voltage: number = NOMINAL_VOLTAGE,
+): number {
+  return Math.round((amps * voltage * phases) / 100) / 10;
+}
+
+/** Render a current limit as the app would show it, e.g. 16 -> "3.7 kW". */
+export function ampsAsKilowatts(
+  amps: number | null,
+  phases: number = DEFAULT_PHASES,
+  voltage: number = NOMINAL_VOLTAGE,
+): string {
+  if (amps === null) {
+    return 'n/a';
+  }
+  return `${ampsToPower(amps, phases, voltage)} kW`;
+}
+
+/** The highest power this socket can deliver, i.e. 32 A on the wired phases. */
+export function maxPowerKw(
+  phases: number = DEFAULT_PHASES,
+  voltage: number = NOMINAL_VOLTAGE,
+): number {
+  return ampsToPower(MAX_CHARGE_CURRENT_A, phases, voltage);
+}
+
+/** The lowest power that still charges, i.e. the 6 A pilot minimum. */
+export function minPowerKw(
+  phases: number = DEFAULT_PHASES,
+  voltage: number = NOMINAL_VOLTAGE,
+): number {
+  return ampsToPower(MIN_CHARGE_CURRENT_A, phases, voltage);
+}
 
 /** Every parameter the plugin polls on each cycle. Kept deliberately short: the
  *  charger is known to become unstable when hammered with large property reads. */
@@ -49,6 +139,7 @@ export const POLLED_PARAMS: readonly string[] = [
   PARAM.CURRENT_L1,
   PARAM.CURRENT_L2,
   PARAM.CURRENT_L3,
+  PARAM.MAX_PHASES,
 ];
 
 /**

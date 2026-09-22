@@ -15,12 +15,17 @@ import { extractProperties, parseAlfenJson, toNumber } from './charger/alfenJson
 import { NodeHttpsTransport } from './charger/http';
 import { AlfenHttpBackend } from './charger/alfenHttpBackend';
 import {
+  MAX_CHARGE_CURRENT_A,
   MIN_CHARGE_CURRENT_A,
   PARAM,
+  ampsAsKilowatts,
+  maxPowerKw,
+  minPowerKw,
   decodeLicenses,
   describeMainState,
   describeMode3,
   describePowerState,
+  describeSolarMode,
 } from './charger/params';
 import { isChargingEnabled, isDrawingPower, isVehicleConnected } from './charger/state';
 import type { ChargerDeviceInfo, ChargerState, Logger } from './charger/types';
@@ -112,7 +117,16 @@ function makeLogger(debug: boolean): Logger {
 }
 
 /** Parameters the probe reads, beyond the ones the plugin polls. */
-const EXTRA_PARAMS = [PARAM.NUM_SOCKETS, PARAM.LICENSES, PARAM.VOLTAGE_L1, PARAM.UPTIME];
+const EXTRA_PARAMS = [
+  PARAM.NUM_SOCKETS,
+  PARAM.LICENSES,
+  PARAM.VOLTAGE_L1,
+  PARAM.UPTIME,
+  PARAM.SOLAR_MODE,
+  PARAM.SOLAR_GREEN_SHARE,
+  PARAM.SOLAR_COMFORT_LEVEL,
+  PARAM.SOLAR_OVERRIDE,
+];
 
 /** Everything the probe collects, ready to print. */
 interface ProbeResult {
@@ -133,6 +147,12 @@ interface ProbeResult {
     uptime: number | null;
     licenseMask: number | null;
     licenses: string[];
+  };
+  solar: {
+    mode: number | null;
+    greenSharePct: number | null;
+    comfortLevelW: number | null;
+    overrideOn: number | null;
   };
   certificateFingerprint: string | null;
 }
@@ -206,6 +226,12 @@ async function main(): Promise<number> {
         licenseMask,
         licenses: licenseMask === null ? [] : decodeLicenses(licenseMask),
       },
+      solar: {
+        mode: toNumber(extras.get(PARAM.SOLAR_MODE)),
+        greenSharePct: toNumber(extras.get(PARAM.SOLAR_GREEN_SHARE)),
+        comfortLevelW: toNumber(extras.get(PARAM.SOLAR_COMFORT_LEVEL)),
+        overrideOn: toNumber(extras.get(PARAM.SOLAR_OVERRIDE)),
+      },
       certificateFingerprint: transport.fingerprint ?? null,
     };
 
@@ -245,7 +271,9 @@ async function readExtras(
 }
 
 function format(result: ProbeResult): string {
-  const { info, state, derived, extras } = result;
+  const { info, state, derived, extras, solar } = result;
+  // The charger tells us the phase count directly, so no guessing from currents.
+  const phases = state.maxPhases === 3 ? 3 : 1;
   const lines = [
     '',
     '  Charger',
@@ -253,11 +281,24 @@ function format(result: ProbeResult): string {
     `    Model             ${info.model}`,
     `    Firmware          ${info.firmwareVersion}`,
     `    Sockets           ${extras.sockets ?? 'n/a'}`,
+    `    Phases            ${state.maxPhases ?? 'n/a'}  (312E_0)`,
     `    Licenses          ${extras.licenses.length > 0 ? extras.licenses.join(', ') : 'none'}`,
     '',
     '  Current limit',
-    `    ${PARAM.NORMAL_MAX_CURRENT} normal max   ${fmt(state.maxCurrentA, 'A')}   <- the plugin writes this`,
-    `    ${PARAM.ACTIVE_MAX_CURRENT} active max   ${fmt(state.activeMaxCurrentA, 'A')}`,
+    `    ${PARAM.NORMAL_MAX_CURRENT} normal max   ${fmt(state.maxCurrentA, 'A')}   = ${ampsAsKilowatts(state.maxCurrentA, phases)}  <- the plugin writes this;`,
+    `                                      this is the app's "Maximum Power" slider`,
+    `    usable range      ${minPowerKw(phases)} - ${maxPowerKw(phases)} kW  (${MIN_CHARGE_CURRENT_A}-${MAX_CHARGE_CURRENT_A}A on ${phases} phase(s))`,
+    `    ${PARAM.ACTIVE_MAX_CURRENT} active max   ${fmt(state.activeMaxCurrentA, 'A')}   = ${ampsAsKilowatts(state.activeMaxCurrentA, phases)}  what the charger is really applying`,
+    '',
+    '  Solar charging (the app\'s Power Settings screen)',
+    `    ${PARAM.SOLAR_MODE} mode         ${describeSolarMode(solar.mode)}`,
+    `    ${PARAM.SOLAR_GREEN_SHARE} green share  ${solar.greenSharePct === null ? 'n/a' : `${solar.greenSharePct}%`}`,
+    `    ${PARAM.SOLAR_COMFORT_LEVEL} comfort lvl  ${solar.comfortLevelW === null ? 'n/a' : `${solar.comfortLevelW}W`}`,
+    `    ${PARAM.SOLAR_OVERRIDE} boost        ${solar.overrideOn === null ? 'n/a' : solar.overrideOn ? 'on' : 'off'}`,
+    ...(solar.mode === 2
+      ? ['    NOTE: Green mode means the charger only charges on solar surplus,',
+         '          so switching Charging on in HomeKit may not start the car.']
+      : []),
     '',
     '  Status',
     `    ${PARAM.MAIN_STATE} main state   ${derived.mainState}`,

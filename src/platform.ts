@@ -52,8 +52,10 @@ export class AlfenChargerPlatform implements DynamicPlatformPlugin {
       return;
     }
 
+    const target = this.config.chargeTarget;
     this.log.debug(
-      `Configured for ${this.config.host}, charge current ${this.config.chargeCurrent}A, ` +
+      `Configured for ${this.config.host}, charge rate ` +
+        `${target.kind === 'power' ? `${target.kilowatts} kW` : `${target.amps}A`}, ` +
         `polling every ${this.config.pollIntervalMs / 1000}s`,
     );
 

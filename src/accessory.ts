@@ -1,10 +1,17 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import { Backoff } from './charger/mutex';
-import { MIN_CHARGE_CURRENT_A, PAUSE_CURRENT_A } from './charger/params';
+import {
+  DEFAULT_PHASES,
+  MIN_CHARGE_CURRENT_A,
+  PAUSE_CURRENT_A,
+  ampsToPower,
+  maxPowerKw,
+  minPowerKw,
+} from './charger/params';
 import { isChargingEnabled, isDrawingPower, isVehicleConnected, summariseState } from './charger/state';
 import type { ChargerBackend, ChargerState, Logger } from './charger/types';
-import type { AlfenPlatformConfig } from './config';
+import { resolveTargetAmps, type AlfenPlatformConfig } from './config';
 import type { AlfenChargerPlatform } from './platform';
 
 /** How long a cached reading may be served to HomeKit before we call it stale. */
@@ -41,6 +48,8 @@ export class AlfenChargerAccessory {
    * whether the Eve Connect app can get in: false means we have stood down.
    */
   private connected = true;
+  /** So a charge rate that cannot be honoured is reported once, not every poll. */
+  private warnedAboutClamp = false;
 
   constructor(
     private readonly platform: AlfenChargerPlatform,
@@ -186,8 +195,10 @@ export class AlfenChargerAccessory {
       throw this.communicationFailure();
     }
 
-    const amps = on ? this.config.chargeCurrent : PAUSE_CURRENT_A;
-    this.log.info(`${on ? 'Resuming' : 'Pausing'} charging (socket limit -> ${amps}A)`);
+    const amps = on ? this.resolveChargeAmps() : PAUSE_CURRENT_A;
+    this.log.info(
+      `${on ? 'Resuming' : 'Pausing'} charging (socket limit -> ${this.describeLimit(amps)})`,
+    );
 
     // Show the requested position straight away; the next poll replaces it with
     // whatever the charger actually reports.
@@ -197,7 +208,9 @@ export class AlfenChargerAccessory {
     try {
       await this.backend.setMaxCurrent(amps);
       this.backoff.reset();
-      this.log.info(`Charging ${on ? 'resumed' : 'paused'} (socket limit is now ${amps}A)`);
+      this.log.info(
+        `Charging ${on ? 'resumed' : 'paused'} (socket limit is now ${this.describeLimit(amps)})`,
+      );
       // Refresh soon so OutletInUse and the switch settle on real values.
       this.schedulePoll(3_000);
     } catch (err) {
@@ -252,6 +265,53 @@ export class AlfenChargerAccessory {
       );
     }
     this.schedulePoll(0);
+  }
+
+  // --------------------------------------------------------------- conversion
+
+  /** Phases wired to this socket, as reported by the charger. */
+  private get phases(): number {
+    const reported = this.lastState?.maxPhases;
+    return reported === 1 || reported === 3 ? reported : DEFAULT_PHASES;
+  }
+
+  /**
+   * Turn the configured charge target into whole amps for this socket.
+   *
+   * The charger stores amps, so a kW setting has to be converted, and that
+   * depends on how many phases are wired. If the request cannot be honoured we
+   * say so once rather than quietly charging at a different rate.
+   */
+  private resolveChargeAmps(): number {
+    const { amps, requestedAmps, clamped } = resolveTargetAmps(
+      this.config.chargeTarget,
+      this.phases,
+      this.config.nominalVoltage,
+    );
+
+    if (clamped && !this.warnedAboutClamp) {
+      this.warnedAboutClamp = true;
+      const target = this.config.chargeTarget;
+      const asked =
+        target.kind === 'power' ? `${target.kilowatts} kW` : `${target.amps}A`;
+      const range =
+        `${minPowerKw(this.phases, this.config.nominalVoltage)}-` +
+        `${maxPowerKw(this.phases, this.config.nominalVoltage)} kW`;
+      this.log.warn(
+        `Configured charge rate of ${asked} works out as ${requestedAmps}A on ${this.phases} phase(s), ` +
+          `which this socket cannot do. Using ${this.describeLimit(amps)} instead. Valid range: ${range}.`,
+      );
+    }
+
+    return amps;
+  }
+
+  /** Format a current limit with the kW figure alongside, since kW is configured. */
+  private describeLimit(amps: number): string {
+    if (amps < MIN_CHARGE_CURRENT_A) {
+      return `${amps}A (below the ${MIN_CHARGE_CURRENT_A}A minimum, so charging stops)`;
+    }
+    return `${amps}A = ${ampsToPower(amps, this.phases, this.config.nominalVoltage)} kW`;
   }
 
   // ------------------------------------------------------------------ polling

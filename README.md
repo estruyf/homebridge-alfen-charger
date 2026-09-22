@@ -18,7 +18,7 @@ back and the car resumes.
 
 | Home app action | What the plugin writes |
 | --- | --- |
-| Charging **ON** | `2129_0` = your configured `chargeCurrent` (default 16 A) |
+| Charging **ON** | `2129_0` = your configured `chargePower` (default 3.7 kW = 16 A) |
 | Charging **OFF** | `2129_0` = 0 A |
 
 Every write is read back and confirmed; if the value did not stick, the plugin
@@ -204,7 +204,7 @@ Use the Homebridge UI form, or add the platform block to `config.json` by hand:
       "name": "Alfen Charger",
       "host": "192.168.1.50",
       "password": "your-charger-password",
-      "chargeCurrent": 16,
+      "chargePower": 3.7,
       "pollInterval": 30
     }
   ]
@@ -218,7 +218,8 @@ Use the Homebridge UI form, or add the platform block to `config.json` by hand:
 | `name` | string | `Alfen Charger` | Name shown in the Home app. |
 | `host` | string | — | **Required.** Charger IP or hostname, without `https://`. |
 | `password` | string | — | **Required.** The charger's admin password. |
-| `chargeCurrent` | 6–32 | `16` | Current limit applied when Charging is switched on. |
+| `chargePower` | kW | `3.7` | Charge rate applied when Charging is switched on, in kW — the same figure the Eve Connect app shows. |
+| `nominalVoltage` | volts | `230` | Voltage used to convert kW to amps. |
 | `pollInterval` | seconds | `30` | How often to read the charger. Minimum 10. |
 | `debug` | boolean | `false` | Log requests and state changes. The password is never logged. |
 | `requestTimeout` | 5–60 s | `15` | Per-request timeout. |
@@ -226,8 +227,12 @@ Use the Homebridge UI form, or add the platform block to `config.json` by hand:
 | `certificateFingerprint` | string | — | Optional SHA-256 pin for the charger's certificate. |
 
 > [!WARNING]
-> Set `chargeCurrent` to something your installation is actually rated for. The
+> Set `chargePower` to something your installation is actually rated for. The
 > plugin will happily write 32 A if you ask it to.
+
+> [!NOTE]
+> `chargeCurrent` (in amps) from earlier versions is still accepted, so an
+> existing config keeps working. If both are present, `chargePower` wins.
 
 ---
 
@@ -250,6 +255,94 @@ and the plugin will refuse to connect. Clear `certificateFingerprint` and
 restart.
 
 ---
+
+## The Eve Connect "Power Settings" screen
+
+Everything on that screen is stored in the charger as ordinary parameters, so
+you can read them with the probe and write them with `POST /api/prop`.
+
+| App control | Parameter | Values |
+| --- | --- | --- |
+| **Maximum Power** slider | `2129_0` `OD_mainNormalMaxCurrent` | Amps. The app shows it as kW. |
+| **Solar Charging** toggle *and* Comfort/Green choice | `3280_1` `OD_sysSolarCharging.operationMode` | `0` off, `1` Comfort, `2` Green |
+| Green mode surplus threshold | `3280_2` `OD_sysSolarCharging.greenShare` | 0–100 % |
+| Comfort minimum charge rate | `3280_3` `OD_sysSolarCharging.comfortLevel` | Watts. Max 3300 on 1-phase, 11000 on 3-phase. |
+| Solar boost | `3280_4` `OD_sysSolarCharging.overrideSocket1` | 0 / 1 |
+
+Note that the toggle and the Comfort/Green radio buttons are **one parameter**,
+not two: turning the toggle off writes `0`.
+
+`npm run probe` prints all of these, so you can compare them against what the
+app shows.
+
+### Maximum Power is the same setting this plugin writes
+
+You configure this plugin in kW, exactly like the app's slider. The charger
+stores amps, so the plugin converts, using the phase count the charger reports
+in `312E_0` and a nominal 230 V:
+
+| 1 phase | 3 phase | `2129_0` |
+| --- | --- | --- |
+| 1.4 kW | 4.1 kW | 6 A — the minimum that charges at all |
+| 3.7 kW | 11 kW | 16 A |
+| 5.0 kW | 15 kW | 22 A |
+| 7.4 kW | 22 kW | 32 A |
+
+So whatever kW you had selected in the app, put the same number in
+`chargePower`.
+
+Because the charger only stores whole amps, the rate you get back is not always
+the rate you asked for: 5.0 kW becomes 22 A, which is really 5.1 kW. The log
+reports what was actually applied rather than what you asked for.
+
+If the kW you configure falls outside what the socket can deliver, the plugin
+clamps it to the 6–32 A range and warns once, naming the usable range for your
+phase count.
+
+> [!NOTE]
+> kW is always a derived figure — the charger holds amps, and the exact voltage
+> the app assumes is not documented. Run the probe and compare `2129_0` against
+> the slider to confirm the mapping on your unit. If your grid voltage differs
+> markedly from 230 V, set `nominalVoltage`.
+
+### How solar charging interacts with this plugin
+
+This matters, because in one mode the charger will overrule HomeKit.
+
+| Mode (`3280_1`) | Turning Charging **on** in HomeKit |
+| --- | --- |
+| **Disabled** (`0`) | Charges at `chargePower`. Predictable. |
+| **Comfort** (`1`) | Charges at least the comfort level even without sun, topping up with surplus. Predictable. |
+| **Green** (`2`) | Sets a *ceiling* only. The charger still waits for solar surplus, so the car may not start charging at all. |
+
+In **Green** mode the plugin will report the write as successful — and it is,
+`2129_0` really did change — but the car will not draw power until there is
+surplus. `OutletInUse` correctly stays off. If you want the HomeKit switch to
+mean "charge now", use **Comfort** or **Disabled**.
+
+Turning Charging **off** works in every mode: 0 A is below the 6 A minimum, so
+the pilot signal stops regardless of what solar charging wants.
+
+The `212C_0` reading in the probe output is useful here — it is the limit the
+charger is *actually* applying, so in Green mode you will see it sitting below
+`2129_0` when there is no surplus.
+
+### Changing solar settings
+
+This plugin only reads these parameters; it never writes them. Change them in
+the Eve Connect app (turn the **Connected** switch off first so the app can log
+in), or write them yourself:
+
+```bash
+# Switch to Comfort mode with a 1.4 kW floor
+curl -sk -X POST https://192.168.1.50/api/prop \
+  -H 'Content-Type: application/json' \
+  -b cookies.txt \
+  -d '{"3280_1":{"id":"3280_1","value":"1"}}'
+```
+
+(You need to `POST /api/login` first and keep the session cookie; the probe's
+`--debug` output shows the exact sequence.)
 
 ## Being gentle with the charger
 

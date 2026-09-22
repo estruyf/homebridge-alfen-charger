@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": true,
   "headerDisplay": "Control charging on an Alfen Eve wallbox from HomeKit.\n\n**Before you start:** run `npm run probe -- --host <ip> --password <password>` to confirm the charger answers.\n\n**Important:** the charger allows a single API session. While this plugin is polling, the Eve Connect app cannot log in. Use the **Connected** switch in the Home app to hand the session over: off for your phone, on for HomeKit control.",
-  "footerDisplay": "There is no real stop command on the Alfen API. The plugin pauses charging by setting the socket current limit (parameter `2129_0`) to 0 A, which is below the 6 A minimum the pilot signal needs, and resumes it by setting the limit back to your configured charge current.",
+  "footerDisplay": "There is no real stop command on the Alfen API. The plugin pauses charging by setting the socket current limit (parameter `2129_0`) to 0 A, which is below the 6 A minimum the pilot signal needs, and resumes it by setting the limit back to your configured charge power.\n\nThe charger stores this limit in amps, so the kW you enter is converted using the phase count it reports (`312E_0`) at 230 V. 3.7 kW is 16 A on one phase.",
   "schema": {
     "type": "object",
     "properties": {
@@ -31,14 +31,14 @@
         },
         "description": "The admin password for the charger's local API - the same one the Eve Connect app uses."
       },
-      "chargeCurrent": {
-        "title": "Charge current (A)",
-        "type": "integer",
-        "default": 16,
-        "minimum": 6,
-        "maximum": 32,
+      "chargePower": {
+        "title": "Charge power (kW)",
+        "type": "number",
+        "default": 3.7,
+        "minimum": 1.4,
+        "maximum": 22,
         "required": true,
-        "description": "Current limit applied when the Charging switch is turned on. Must not exceed what your installation is rated for."
+        "description": "Charge rate applied when the Charging switch is turned on, in kW - the same figure the Eve Connect app shows on its Maximum Power slider. The plugin converts it to amps using the number of phases the charger reports. Single phase: 1.4-7.4 kW. Three phase: 4.1-22 kW."
       },
       "pollInterval": {
         "title": "Poll interval (seconds)",
@@ -76,6 +76,14 @@
         "type": "string",
         "placeholder": "AB:CD:EF:...",
         "description": "Optional. Pin the charger's self-signed certificate. Leave empty to trust the first certificate seen. The probe script prints this value."
+      },
+      "nominalVoltage": {
+        "title": "Nominal voltage (V)",
+        "type": "integer",
+        "default": 230,
+        "minimum": 100,
+        "maximum": 500,
+        "description": "Voltage used to convert kW to amps. Only change this if your grid voltage differs markedly from 230 V."
       }
     }
   },
@@ -83,7 +91,7 @@
     "name",
     "host",
     "password",
-    "chargeCurrent",
+    "chargePower",
     "pollInterval",
     {
       "type": "fieldset",
@@ -92,6 +100,7 @@
       "expanded": false,
       "items": [
         "requestTimeout",
+        "nominalVoltage",
         "powerThreshold",
         "debug",
         "certificateFingerprint"

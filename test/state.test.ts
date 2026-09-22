@@ -1,4 +1,5 @@
 import { isChargingEnabled, isDrawingPower, isVehicleConnected, summariseState } from '../src/charger/state';
+import { ampsAsKilowatts, describeSolarMode } from '../src/charger/params';
 import type { ChargerState } from '../src/charger/types';
 
 function state(partial: Partial<ChargerState> = {}): ChargerState {
@@ -10,6 +11,7 @@ function state(partial: Partial<ChargerState> = {}): ChargerState {
     mode3State: null,
     socketState: null,
     mainState: null,
+    maxPhases: null,
     readAt: Date.now(),
     ...partial,
   };
@@ -89,5 +91,38 @@ describe('summariseState', () => {
 
   it('shows n/a rather than null', () => {
     expect(summariseState(state())).toContain('limit=n/a');
+  });
+});
+
+describe('solar mode decoding', () => {
+  it.each([
+    [0, 'Disabled'],
+    [1, 'Comfort'],
+    [2, 'Green'],
+  ])('decodes 3280_1 = %i as %s', (value, expected) => {
+    expect(describeSolarMode(value)).toBe(expected);
+  });
+
+  it('is explicit about values it does not recognise', () => {
+    expect(describeSolarMode(null)).toBe('unknown');
+    expect(describeSolarMode(9)).toBe('unknown (9)');
+  });
+});
+
+describe('ampsAsKilowatts', () => {
+  it('matches the ranges shown on the app slider', () => {
+    // The app shows Min 1.4 kW / Max 7.4 kW for a 1-phase socket, which is
+    // 6 A and 32 A at a nominal 230 V.
+    expect(ampsAsKilowatts(6)).toBe('1.4 kW');
+    expect(ampsAsKilowatts(16)).toBe('3.7 kW');
+    expect(ampsAsKilowatts(32)).toBe('7.4 kW');
+  });
+
+  it('scales for a 3-phase socket', () => {
+    expect(ampsAsKilowatts(16, 3)).toBe('11 kW');
+  });
+
+  it('handles a missing reading', () => {
+    expect(ampsAsKilowatts(null)).toBe('n/a');
   });
 });

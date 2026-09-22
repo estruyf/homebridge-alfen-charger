@@ -20,6 +20,8 @@ export interface ChargerState {
   socketState: number | null;
   /** 2501_1 - raw main state. */
   mainState: number | null;
+  /** 312E_0 - phases wired to the socket, 1 or 3. Used to convert kW to amps. */
+  maxPhases: number | null;
   /** When this snapshot was taken (epoch ms). */
   readAt: number;
 }
