@@ -107,6 +107,13 @@ export class NodeHttpsTransport implements HttpTransport {
         }
       };
 
+      // The charger's embedded HTTP server rejects chunked request bodies with
+      // HTTP 400, and Node falls back to chunked whenever Content-Length is
+      // absent. Both reference clients send it, so always set it explicitly -
+      // including the zero-length body that logout posts.
+      const bodyBuffer =
+        request.body === undefined ? undefined : Buffer.from(request.body, 'utf8');
+
       const req = https.request(
         {
           host: this.host,
@@ -117,6 +124,9 @@ export class NodeHttpsTransport implements HttpTransport {
           headers: {
             Accept: 'application/json, alfen/json, */*',
             ...request.headers,
+            ...(bodyBuffer === undefined
+              ? {}
+              : { 'Content-Length': String(bodyBuffer.length) }),
           },
         },
         (res) => {
@@ -162,8 +172,13 @@ export class NodeHttpsTransport implements HttpTransport {
           }
         };
 
-        if ((tlsSocket as TLSSocket & { authorized?: boolean }).encrypted) {
-          // Reused keep-alive socket: already connected and already checked.
+        // `encrypted` is true from construction, so it cannot tell us whether the
+        // handshake has finished. Ask for the certificate instead: a fresh socket
+        // has none yet and must wait for 'secureConnect', while a reused
+        // keep-alive socket already has one and can be checked immediately.
+        // Getting this wrong lets the first request of a connection go out
+        // before the certificate has been pinned.
+        if (hasPeerCertificate(tlsSocket)) {
           check();
         } else {
           tlsSocket.once('secureConnect', check);
@@ -176,8 +191,8 @@ export class NodeHttpsTransport implements HttpTransport {
 
       req.on('error', (err) => finish(() => reject(err)));
 
-      if (request.body !== undefined) {
-        req.write(request.body);
+      if (bodyBuffer !== undefined && bodyBuffer.length > 0) {
+        req.write(bodyBuffer);
       }
       req.end();
     });
@@ -185,6 +200,19 @@ export class NodeHttpsTransport implements HttpTransport {
 
   closeConnections(): void {
     this.agent.destroy();
+  }
+}
+
+/** True once the TLS handshake has produced a peer certificate. */
+function hasPeerCertificate(socket: TLSSocket): boolean {
+  if (typeof socket.getPeerCertificate !== 'function') {
+    return false;
+  }
+  try {
+    const cert = socket.getPeerCertificate();
+    return Boolean(cert && Object.keys(cert).length > 0);
+  } catch {
+    return false;
   }
 }
 

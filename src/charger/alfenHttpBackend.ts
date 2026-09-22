@@ -375,8 +375,11 @@ function isAuthFailure(statusCode: number): boolean {
 
 function assertOk(response: HttpResponse, what: string): void {
   if (response.statusCode < 200 || response.statusCode >= 300) {
+    // Include whatever the charger said; it often explains the refusal, and a
+    // bare status code leaves nothing to go on.
+    const detail = response.body.trim().replace(/\s+/g, ' ').slice(0, 200);
     throw new ChargerTransportError(
-      `${what} returned HTTP ${response.statusCode}`,
+      `${what} returned HTTP ${response.statusCode}${detail ? `: ${detail}` : ''}`,
       response.statusCode,
     );
   }
