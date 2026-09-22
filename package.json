@@ -1,0 +1,63 @@
+{
+  "displayName": "Homebridge Alfen Charger",
+  "name": "homebridge-alfen-charger",
+  "version": "1.0.0",
+  "description": "Start and stop EV charging on an Alfen Eve Single wallbox from Apple HomeKit.",
+  "license": "MIT",
+  "author": {
+    "name": "Elio Struyf",
+    "url": "https://www.eliostruyf.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/estruyf/homebridge-alfen-charger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/estruyf/homebridge-alfen-charger/issues"
+  },
+  "homepage": "https://github.com/estruyf/homebridge-alfen-charger#readme",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "engines": {
+    "node": "^20.17.0 || ^22.9.0 || ^24",
+    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "alfen",
+    "alfen-eve",
+    "wallbox",
+    "ev",
+    "ev-charger",
+    "charging",
+    "homekit"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run lint && npm run build",
+    "lint": "eslint src test --max-warnings 0",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "probe": "ts-node --transpile-only src/probe.ts"
+  },
+  "files": [
+    "dist",
+    "config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "eslint": "^8.57.1",
+    "homebridge": "^1.8.5",
+    "jest": "^29.7.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}

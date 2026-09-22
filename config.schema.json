@@ -1,0 +1,101 @@
+{
+  "pluginAlias": "AlfenCharger",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Control charging on an Alfen Eve wallbox from HomeKit.\n\n**Before you start:** run `npm run probe -- --host <ip> --password <password>` to confirm the charger answers.\n\n**Important:** the charger allows a single API session. While this plugin is polling, the Eve Connect app cannot log in. Use the **Connected** switch in the Home app to hand the session over: off for your phone, on for HomeKit control.",
+  "footerDisplay": "There is no real stop command on the Alfen API. The plugin pauses charging by setting the socket current limit (parameter `2129_0`) to 0 A, which is below the 6 A minimum the pilot signal needs, and resumes it by setting the limit back to your configured charge current.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Alfen Charger",
+        "required": true,
+        "description": "Name shown in the Home app."
+      },
+      "host": {
+        "title": "Charger IP address",
+        "type": "string",
+        "required": true,
+        "format": "hostname",
+        "placeholder": "192.168.1.50",
+        "description": "The charger's IP address or hostname on your LAN. Do not include https://."
+      },
+      "password": {
+        "title": "Charger password",
+        "type": "string",
+        "required": true,
+        "x-schema-form": {
+          "type": "password"
+        },
+        "description": "The admin password for the charger's local API - the same one the Eve Connect app uses."
+      },
+      "chargeCurrent": {
+        "title": "Charge current (A)",
+        "type": "integer",
+        "default": 16,
+        "minimum": 6,
+        "maximum": 32,
+        "required": true,
+        "description": "Current limit applied when the Charging switch is turned on. Must not exceed what your installation is rated for."
+      },
+      "pollInterval": {
+        "title": "Poll interval (seconds)",
+        "type": "integer",
+        "default": 30,
+        "minimum": 10,
+        "maximum": 3600,
+        "required": true,
+        "description": "How often to read the charger. Lower values mean faster updates but more load; the charger is known to be unhappy when polled hard."
+      },
+      "debug": {
+        "title": "Debug logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Log every request and state change. The password is never logged."
+      },
+      "requestTimeout": {
+        "title": "Request timeout (seconds)",
+        "type": "integer",
+        "default": 15,
+        "minimum": 5,
+        "maximum": 60,
+        "description": "How long to wait for a single API call before giving up."
+      },
+      "powerThreshold": {
+        "title": "In-use power threshold (W)",
+        "type": "integer",
+        "default": 100,
+        "minimum": 0,
+        "maximum": 5000,
+        "description": "Power above which the Charge Point outlet reports as in use."
+      },
+      "certificateFingerprint": {
+        "title": "Certificate fingerprint (SHA-256)",
+        "type": "string",
+        "placeholder": "AB:CD:EF:...",
+        "description": "Optional. Pin the charger's self-signed certificate. Leave empty to trust the first certificate seen. The probe script prints this value."
+      }
+    }
+  },
+  "layout": [
+    "name",
+    "host",
+    "password",
+    "chargeCurrent",
+    "pollInterval",
+    {
+      "type": "fieldset",
+      "title": "Advanced",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "requestTimeout",
+        "powerThreshold",
+        "debug",
+        "certificateFingerprint"
+      ]
+    }
+  ]
+}
