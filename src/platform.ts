@@ -90,32 +90,52 @@ export class AlfenChargerPlatform implements DynamicPlatformPlugin {
       logger,
     });
 
-    // The accessory UUID is derived from the host, so pointing the plugin at a
-    // different charger produces a new accessory rather than reusing this one.
-    const uuid = this.api.hap.uuid.generate(`${PLUGIN_NAME}:${config.host}`);
-    const existing = this.cachedAccessories.find((item) => item.UUID === uuid);
+    // UUIDs are derived from the host, so pointing the plugin at a different
+    // charger produces new accessories rather than reusing these.
+    //
+    // The charging accessory keeps the UUID the single combined accessory used,
+    // so upgrading from an earlier version leaves its room, favourite and
+    // automations intact; only the connection tile is new.
+    const chargingUuid = this.api.hap.uuid.generate(`${PLUGIN_NAME}:${config.host}`);
+    const connectionUuid = this.api.hap.uuid.generate(`${PLUGIN_NAME}:${config.host}:connection`);
 
-    let platformAccessory: PlatformAccessory;
-    if (existing) {
-      this.log.info(`Using cached accessory for ${config.host}`);
-      existing.displayName = config.name;
-      platformAccessory = existing;
-    } else {
-      this.log.info(`Adding accessory for ${config.host}`);
-      platformAccessory = new this.api.platformAccessory(config.name, uuid);
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [platformAccessory]);
-    }
+    const chargingAccessory = this.adopt(chargingUuid, config.name);
+    const connectionAccessory = this.adopt(connectionUuid, `${config.name} Connection`);
 
     // Drop any cached accessories that no longer correspond to the config, so a
     // changed host does not leave a dead tile in the Home app.
-    const stale = this.cachedAccessories.filter((item) => item.UUID !== uuid);
+    const stale = this.cachedAccessories.filter(
+      (item) => item.UUID !== chargingUuid && item.UUID !== connectionUuid,
+    );
     if (stale.length > 0) {
       this.log.info(`Removing ${stale.length} stale accessory/accessories`);
       this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, stale);
     }
 
-    this.accessory = new AlfenChargerAccessory(this, platformAccessory, this.backend, config, logger);
+    this.accessory = new AlfenChargerAccessory(
+      this,
+      chargingAccessory,
+      connectionAccessory,
+      this.backend,
+      config,
+      logger,
+    );
     await this.accessory.begin();
+  }
+
+  /** Reuse the cached accessory for this UUID, or register a fresh one. */
+  private adopt(uuid: string, displayName: string): PlatformAccessory {
+    const existing = this.cachedAccessories.find((item) => item.UUID === uuid);
+    if (existing) {
+      this.log.debug(`Using cached accessory "${existing.displayName}"`);
+      existing.displayName = displayName;
+      return existing;
+    }
+
+    this.log.info(`Adding accessory "${displayName}"`);
+    const accessory = new this.api.platformAccessory(displayName, uuid);
+    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    return accessory;
   }
 
   private async stop(): Promise<void> {

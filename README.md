@@ -30,7 +30,7 @@ retries once before reporting a failure to HomeKit.
 > The charger allows **one API session at a time**. While this plugin is logged
 > in, the **Eve Connect** app cannot connect, and vice versa.
 
-The plugin exposes a **Connected** switch that decides who holds the session:
+The plugin exposes a **Connection** tile that decides who holds the session:
 
 - **On** — the plugin is logged in and polling. Charging can be controlled from
   HomeKit, and the Eve Connect app is locked out.
@@ -40,8 +40,8 @@ The plugin exposes a **Connected** switch that decides who holds the session:
 So: switch it **off** to use your phone, **on** to control charging from
 HomeKit. It starts **on**.
 
-While it is off the Charging switch still shows the last reading the plugin
-took, but refuses changes — there is no session to write through.
+While it is off the Charging tile still shows the last reading the plugin took,
+but refuses changes — there is no session to write through.
 
 If you switch it back on while the phone app is still connected, the charger
 will refuse the login and the plugin retries with backoff. Close Eve Connect and
@@ -49,11 +49,17 @@ it recovers on its own, no restart needed.
 
 ## What you get in HomeKit
 
-| Service | Type | Behaviour |
+Two **separate accessories**, so each gets its own tile in the Home app and a
+single tap does one thing:
+
+| Tile | Type | Behaviour |
 | --- | --- | --- |
-| **Charging** | Switch | On/off writes the socket current limit. State reflects the limit read back from the charger. |
-| **Charge Point** | Outlet | `On` mirrors the Charging switch, so either control works. `OutletInUse` is true when the car is actually drawing power. |
-| **Connected** | Switch | On: the plugin holds the charger session and can control charging. Off: the session is released for the Eve Connect app. |
+| **Alfen Charger** | Outlet | Tap to start or stop charging — `On` writes the socket current limit, and the state reflects the limit read back from the charger. `OutletInUse` is true when the car is actually drawing power. |
+| **Alfen Charger Connection** | Switch | On: the plugin holds the charger session and can control charging. Off: the session is released for the Eve Connect app. |
+
+Both tiles are named after the `name` in your config, so setting `name` to
+`Wallbox` gives you **Wallbox** and **Wallbox Connection**. Rename either one in
+the Home app afterwards if you prefer something shorter.
 
 "Actually drawing power" is read from the meter (`2221_16`, real power sum) and
 compared against `powerThreshold` (default 100 W). On units without a meter the
@@ -218,7 +224,7 @@ Use the Homebridge UI form, or add the platform block to `config.json` by hand:
 | `name` | string | `Alfen Charger` | Name shown in the Home app. |
 | `host` | string | — | **Required.** Charger IP or hostname, without `https://`. |
 | `password` | string | — | **Required.** The charger's admin password. |
-| `chargePower` | kW | `3.7` | Charge rate applied when Charging is switched on, in kW — the same figure the Eve Connect app shows. |
+| `chargePower` | kW | `3.7` | Charge rate applied when the Charging tile is switched on, in kW — the same figure the Eve Connect app shows. |
 | `nominalVoltage` | volts | `230` | Voltage used to convert kW to amps. |
 | `pollInterval` | seconds | `30` | How often to read the charger. Minimum 10. |
 | `debug` | boolean | `false` | Log requests and state changes. The password is never logged. |
@@ -317,7 +323,7 @@ This matters, because in one mode the charger will overrule HomeKit.
 
 In **Green** mode the plugin will report the write as successful — and it is,
 `2129_0` really did change — but the car will not draw power until there is
-surplus. `OutletInUse` correctly stays off. If you want the HomeKit switch to
+surplus. `OutletInUse` correctly stays off. If you want the Charging tile to
 mean "charge now", use **Comfort** or **Disabled**.
 
 Turning Charging **off** works in every mode: 0 A is below the 6 A minimum, so
@@ -330,7 +336,7 @@ charger is *actually* applying, so in Green mode you will see it sitting below
 ### Changing solar settings
 
 This plugin only reads these parameters; it never writes them. Change them in
-the Eve Connect app (turn the **Connected** switch off first so the app can log
+the Eve Connect app (turn the **Connection** switch off first so the app can log
 in), or write them yourself:
 
 ```bash
@@ -390,7 +396,7 @@ Notes for that work:
 - Requires the **Active Load Balancing** licence. The probe prints the licence
   list; look for `LoadBalancing_Active`.
 - Modbus does **not** block the Eve Connect app, so such a backend would set
-  `isExclusive = false` and the accessory would omit the Connected switch.
+  `isExclusive = false` and the plugin would omit the Connection accessory.
 
 ---
 

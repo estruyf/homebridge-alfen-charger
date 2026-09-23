@@ -20,13 +20,16 @@ const STATE_MAX_AGE_MS = 5 * 60_000;
 /**
  * The HomeKit face of the charger.
  *
- * Three services:
- *  - Switch "Charging"    - writes the socket current limit (chargeCurrent / 0 A)
- *  - Outlet "Charge Point"- OutletInUse reflects real power draw
- *  - Switch "Connected"   - holds or releases the charger's single API session
+ * Two separate accessories, so the Home app gives each its own tile rather than
+ * folding them into one where a single tap hits whichever service HomeKit picks:
+ *
+ *  - Charging   - an Outlet. `On` writes the socket current limit
+ *                 (chargeCurrent / 0 A); `OutletInUse` reflects real power draw.
+ *  - Connection - a Switch that holds or releases the charger's single API session.
+ *
+ * Both are driven from one poll loop, which is why they live in one class.
  */
 export class AlfenChargerAccessory {
-  private readonly chargingSwitch: Service;
   private readonly outlet: Service;
   private readonly connectionSwitch: Service;
 
@@ -53,56 +56,95 @@ export class AlfenChargerAccessory {
 
   constructor(
     private readonly platform: AlfenChargerPlatform,
-    private readonly accessory: PlatformAccessory,
+    private readonly chargingAccessory: PlatformAccessory,
+    private readonly connectionAccessory: PlatformAccessory,
     private readonly backend: ChargerBackend,
     private readonly config: AlfenPlatformConfig,
     private readonly log: Logger,
   ) {
     const { Service, Characteristic } = this.platform;
 
-    this.accessory
-      .getService(Service.AccessoryInformation)!
-      .setCharacteristic(Characteristic.Manufacturer, 'Alfen')
-      .setCharacteristic(Characteristic.Model, 'Eve Single')
-      .setCharacteristic(Characteristic.SerialNumber, this.config.host);
+    this.describe(this.chargingAccessory);
+    this.describe(this.connectionAccessory);
 
-    this.chargingSwitch =
-      this.accessory.getService('Charging') ??
-      this.accessory.addService(Service.Switch, 'Charging', 'charging');
-    this.chargingSwitch.setCharacteristic(Characteristic.ConfiguredName, 'Charging');
-    this.chargingSwitch
-      .getCharacteristic(Characteristic.On)
-      .onGet(() => this.getChargingOn())
-      .onSet((value) => this.setChargingOn(value));
+    // Earlier versions put all three services on one accessory, which the Home
+    // app shows as a single grouped tile. Drop the extras so the charging
+    // accessory is left with just the outlet and gets a tile of its own.
+    this.removeLegacyServices(this.chargingAccessory, ['charging', 'connection'], ['Charging', 'Connected', 'App access']);
 
     this.outlet =
-      this.accessory.getService('Charge Point') ??
-      this.accessory.addService(Service.Outlet, 'Charge Point', 'charge-point');
-    this.outlet.setCharacteristic(Characteristic.ConfiguredName, 'Charge Point');
-    // The outlet's On mirrors the Charging switch, so either control works and
-    // the two stay in step. OutletInUse is the read-only "is the car drawing?".
+      this.chargingAccessory.getServiceById(Service.Outlet, 'charge-point') ??
+      this.chargingAccessory.addService(Service.Outlet, this.chargingAccessory.displayName, 'charge-point');
+    this.outlet.setCharacteristic(Characteristic.ConfiguredName, this.chargingAccessory.displayName);
+    // On starts and stops the charging session; OutletInUse is the read-only
+    // "is the car actually drawing?".
     this.outlet
       .getCharacteristic(Characteristic.On)
       .onGet(() => this.getChargingOn())
       .onSet((value) => this.setChargingOn(value));
     this.outlet.getCharacteristic(Characteristic.OutletInUse).onGet(() => this.getOutletInUse());
 
-    // Older versions shipped an inverted "App access" switch. Drop it so a
-    // cached accessory does not keep showing a tile that no longer does anything.
-    const legacy = this.accessory.getService('App access');
-    if (legacy) {
-      this.log.info('Replacing the old "App access" switch with "Connected" (the on/off sense is now reversed).');
-      this.accessory.removeService(legacy);
-    }
-
     this.connectionSwitch =
-      this.accessory.getService('Connected') ??
-      this.accessory.addService(Service.Switch, 'Connected', 'connection');
-    this.connectionSwitch.setCharacteristic(Characteristic.ConfiguredName, 'Connected');
+      this.connectionAccessory.getServiceById(Service.Switch, 'connection') ??
+      this.connectionAccessory.addService(Service.Switch, this.connectionAccessory.displayName, 'connection');
+    this.connectionSwitch.setCharacteristic(
+      Characteristic.ConfiguredName,
+      this.connectionAccessory.displayName,
+    );
     this.connectionSwitch
       .getCharacteristic(Characteristic.On)
       .onGet(() => this.connected)
       .onSet((value) => this.setConnected(value));
+  }
+
+  /** Stamp the shared identity onto an accessory's information service. */
+  private describe(accessory: PlatformAccessory): void {
+    const { Service, Characteristic } = this.platform;
+    accessory
+      .getService(Service.AccessoryInformation)!
+      .setCharacteristic(Characteristic.Manufacturer, 'Alfen')
+      .setCharacteristic(Characteristic.Model, 'Eve Single')
+      .setCharacteristic(Characteristic.SerialNumber, this.config.host);
+  }
+
+  /**
+   * Strip services a previous version added to this accessory.
+   *
+   * Matched on subtype first, since that survives a rename in the Home app, and
+   * on the original display names as a fallback for accessories cached before
+   * subtypes were used consistently.
+   */
+  private removeLegacyServices(
+    accessory: PlatformAccessory,
+    subtypes: string[],
+    names: string[],
+  ): void {
+    const { Service } = this.platform;
+    const doomed = new Set<Service>();
+
+    for (const subtype of subtypes) {
+      const bySubtype =
+        accessory.getServiceById(Service.Switch, subtype) ??
+        accessory.getServiceById(Service.Outlet, subtype);
+      if (bySubtype) {
+        doomed.add(bySubtype);
+      }
+    }
+    for (const name of names) {
+      const byName = accessory.getService(name);
+      // Never remove the outlet we are about to reuse, whatever it is called.
+      if (byName && byName.subtype !== 'charge-point') {
+        doomed.add(byName);
+      }
+    }
+
+    for (const service of doomed) {
+      this.log.info(
+        `Removing the old "${service.displayName}" service from ${accessory.displayName}: ` +
+          'it now has its own tile in the Home app.',
+      );
+      accessory.removeService(service);
+    }
   }
 
   /** Connect, read identity, and start polling. */
@@ -112,11 +154,13 @@ export class AlfenChargerAccessory {
       this.log.info(
         `Connected to ${info.identity} (${info.model}, firmware ${info.firmwareVersion}) at ${this.config.host}`,
       );
-      this.accessory
-        .getService(this.platform.Service.AccessoryInformation)!
-        .setCharacteristic(this.platform.Characteristic.Model, info.model)
-        .setCharacteristic(this.platform.Characteristic.SerialNumber, info.identity)
-        .setCharacteristic(this.platform.Characteristic.FirmwareRevision, info.firmwareVersion);
+      for (const accessory of [this.chargingAccessory, this.connectionAccessory]) {
+        accessory
+          .getService(this.platform.Service.AccessoryInformation)!
+          .setCharacteristic(this.platform.Characteristic.Model, info.model)
+          .setCharacteristic(this.platform.Characteristic.SerialNumber, info.identity)
+          .setCharacteristic(this.platform.Characteristic.FirmwareRevision, info.firmwareVersion);
+      }
     } catch (err) {
       // /api/info is unauthenticated, so this failing usually means the host is
       // wrong or unreachable. Carry on: polling will report the real problem.
@@ -126,7 +170,7 @@ export class AlfenChargerAccessory {
     if (this.backend.isExclusive) {
       this.log.info(
         'The charger allows one session at a time: while this plugin is connected, ' +
-          'the Eve Connect app cannot log in. Turn off the "Connected" switch to hand the session over.',
+          `the Eve Connect app cannot log in. Turn off "${this.connectionAccessory.displayName}" to hand the session over.`,
       );
     }
 
@@ -190,7 +234,8 @@ export class AlfenChargerAccessory {
 
     if (!this.connected) {
       this.log.warn(
-        'Ignoring a charging change: the "Connected" switch is off, so the plugin has no charger session.',
+        `Ignoring a charging change: "${this.connectionAccessory.displayName}" is off, ` +
+          'so the plugin has no charger session.',
       );
       throw this.communicationFailure();
     }
@@ -399,8 +444,6 @@ export class AlfenChargerAccessory {
   }
 
   private syncChargingCharacteristics(on: boolean): void {
-    const { Characteristic } = this.platform;
-    this.chargingSwitch.updateCharacteristic(Characteristic.On, on);
-    this.outlet.updateCharacteristic(Characteristic.On, on);
+    this.outlet.updateCharacteristic(this.platform.Characteristic.On, on);
   }
 }

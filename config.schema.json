@@ -2,7 +2,7 @@
   "pluginAlias": "AlfenCharger",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Control charging on an Alfen Eve wallbox from HomeKit.\n\n**Before you start:** run `npm run probe -- --host <ip> --password <password>` to confirm the charger answers.\n\n**Important:** the charger allows a single API session. While this plugin is polling, the Eve Connect app cannot log in. Use the **Connected** switch in the Home app to hand the session over: off for your phone, on for HomeKit control.",
+  "headerDisplay": "Control charging on an Alfen Eve wallbox from HomeKit.\n\n**Before you start:** run `npm run probe -- --host <ip> --password <password>` to confirm the charger answers.\n\n**Important:** the charger allows a single API session. While this plugin is polling, the Eve Connect app cannot log in. The plugin adds two tiles to the Home app: **Charging** and **Connection**. Use the **Connection** switch to hand the session over: off for your phone, on for HomeKit control.",
   "footerDisplay": "There is no real stop command on the Alfen API. The plugin pauses charging by setting the socket current limit (parameter `2129_0`) to 0 A, which is below the 6 A minimum the pilot signal needs, and resumes it by setting the limit back to your configured charge power.\n\nThe charger stores this limit in amps, so the kW you enter is converted using the phase count it reports (`312E_0`) at 230 V. 3.7 kW is 16 A on one phase.",
   "schema": {
     "type": "object",
@@ -12,7 +12,7 @@
         "type": "string",
         "default": "Alfen Charger",
         "required": true,
-        "description": "Name shown in the Home app."
+        "description": "Base name for the Home app tiles. You get this name for the charging tile and \"<name> Connection\" for the session switch."
       },
       "host": {
         "title": "Charger IP address",
@@ -38,7 +38,7 @@
         "minimum": 1.4,
         "maximum": 22,
         "required": true,
-        "description": "Charge rate applied when the Charging switch is turned on, in kW - the same figure the Eve Connect app shows on its Maximum Power slider. The plugin converts it to amps using the number of phases the charger reports. Single phase: 1.4-7.4 kW. Three phase: 4.1-22 kW."
+        "description": "Charge rate applied when the Charging tile is turned on, in kW - the same figure the Eve Connect app shows on its Maximum Power slider. The plugin converts it to amps using the number of phases the charger reports. Single phase: 1.4-7.4 kW. Three phase: 4.1-22 kW."
       },
       "pollInterval": {
         "title": "Poll interval (seconds)",
@@ -69,7 +69,7 @@
         "default": 100,
         "minimum": 0,
         "maximum": 5000,
-        "description": "Power above which the Charge Point outlet reports as in use."
+        "description": "Power above which the Charging tile reports as in use."
       },
       "certificateFingerprint": {
         "title": "Certificate fingerprint (SHA-256)",

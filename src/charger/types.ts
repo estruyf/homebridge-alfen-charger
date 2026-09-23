@@ -49,7 +49,8 @@ export interface ChargerBackend {
   /**
    * True when holding this backend open locks other clients out. The HTTP API
    * allows only one session, so it blocks the Eve Connect app; Modbus does not.
-   * The accessory only offers the "Connected" switch when this is true.
+   * Only then is the Connection accessory worth showing, since there is no
+   * session to hand over otherwise.
    */
   readonly isExclusive: boolean;
 
